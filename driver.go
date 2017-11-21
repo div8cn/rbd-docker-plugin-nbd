@@ -311,11 +311,23 @@ func (d cephRBDVolumeDriver) Remove(r dkvolume.Request) dkvolume.Response {
 	}
 
 	// attempt to gain lock before remove - lock seems to disappear after rm (but not after rename)
-	locker, err := d.lockImage(pool, name)
+	lockers, err := d.sh_getImageLocks(pool, name)
 	if err != nil {
-		errString := fmt.Sprintf("Unable to lock image for remove: %s", name)
-		log.Println("ERROR: " + errString)
-		return dkvolume.Response{Err: errString}
+		log.Printf("ERROR: locking RBD Image(%s): %s", name, err)
+		return dkvolume.Response{Err: "List image locks failed"}
+	}
+
+	if len(lockers) > 1 {
+		log.Printf("ERROR: More than one lock exist on image(%s)", name)
+		return dkvolume.Response{Err: "More than one lock"}
+	} else if len(lockers) == 1 {
+		// preempt lock
+		img_locker := lockers[0]
+		err = d.preemptRBDLock(pool, name, img_locker)
+		if err != nil {
+			log.Printf("ERROR: locking RBD image(%s) failed: %s", name, err)
+			return dkvolume.Response{Err: "Preempt lock failed"}
+		}
 	}
 
 	// For data safety, we never do image delete operation
@@ -344,14 +356,14 @@ func (d cephRBDVolumeDriver) Remove(r dkvolume.Request) dkvolume.Response {
 				prefix, name, err)
 			log.Println("ERROR: " + errString)
 			// unlock by old name
-			defer d.unlockImage(pool, name, locker)
+			// defer d.unlockImage(pool, name, locker)
 			return dkvolume.Response{Err: errString}
 		}
 		// unlock by new name
-		defer d.unlockImage(pool, new_name, locker)
+		//defer d.unlockImage(pool, new_name, locker)
 	} else {
 		// ignore the remove call - but unlock ?
-		defer d.unlockImage(pool, name, locker)
+		// defer d.unlockImage(pool, name, locker)
 	}
 
 	delete(d.volumes, mount)
@@ -694,17 +706,10 @@ func (d cephRBDVolumeDriver) Unmount(r dkvolume.UnmountRequest) dkvolume.Respons
 		return dkvolume.Response{}
 	}
 
-	// shutdown xfs before umount
-	// application should make sure data is safely written to disk
-	// before reurun success
-	err = d.shutdownXfs(mount)
-	if err != nil {
-		log.Printf("ERROR: shutdown xfs path(%s): %s", mount, err)
-	}
 	err = d.unmountPath(mount)
 	if err != nil {
+		// failsafe: will still attempt to unmap
 		log.Printf("ERROR: unmounting path(%s): %s", mount, err)
-		return dkvolume.Response{Err: err.Error()}
 	}
 
 	// unmap
@@ -1205,7 +1210,10 @@ func (d *cephRBDVolumeDriver) goceph_removeRBDImage(pool, name string) error {
 
 // kill rbd-nbd process with the same poo/name
 func (d *cephRBDVolumeDriver) sh_kill_rbd_nbd(pool, name string) error {
-	procs := listProcesses()
+	err, procs := listProcesses()
+	if err != nil {
+		return err
+	}
 	target := fmt.Sprintf("%s/%s", pool, name)
 	for _, proc := range procs {
 		if strings.Contains(proc.Executable, target) && strings.Contains(proc.Executable,
@@ -1275,7 +1283,8 @@ func (d *cephRBDVolumeDriver) renameRBDImage(pool, name, newname string) error {
 func (d *cephRBDVolumeDriver) sh_renameRBDImage(pool, name, newname string) error {
 	log.Println("INFO: Rename RBD Image(%s/%s -> %s)", pool, name, newname)
 
-	out, err := d.rbdsh(pool, "rename", name, newname)
+	dest := strings.Join([]string{pool, newname}, "/")
+	out, err := d.rbdsh(pool, "rename", name, dest)
 	if err != nil {
 		log.Printf("ERROR: unable to rename: %s: %s", err, out)
 		return err
@@ -1375,42 +1384,73 @@ func (d *cephRBDVolumeDriver) xfsRepairDryRun(device string) error {
 	// corruption was detected and 0 if no filesystem corruption was detected." xfs_repair(8)
 	// TODO: can we check cmd output and ensure the mount/unmount is suggested by stale disk log?
 
-	_, err := shWithDefaultTimeout("xfs_repair", "-n", device)
+	_, err := shWithTimeout(10*60*time.Second, "xfs_repair", "-n", device)
 	return err
 }
 
-func (d *cephRBDVolumeDriver) xfsRepair(device string) error {
+func (d *cephRBDVolumeDriver) xfsRepair(device string, clear_log bool) error {
 	log.Printf("WARN: xfs repair begin for %s", device)
 	// timeout is 10min
-	_, err := shWithTimeout(10*60*time.Second, "xfs_repair", device)
-	log.Printf("WARN: xfs repair end for %s", device)
-
-	return err
+	if clear_log {
+		log.Printf("ERROR: xfs repair %s by drop fs's log", device)
+		_, err := shWithTimeout(10*60*time.Second, "xfs_repair", "-L", device)
+		log.Printf("ERROR: xfs repair end for %s", device)
+		return err
+	} else {
+		_, err := shWithTimeout(10*60*time.Second, "xfs_repair", device)
+		log.Printf("WARN: xfs repair end for %s", device)
+		return err
+	}
 }
 
-// attemptLimitedXFSRepair will try mount/unmount and return result of another xfs-repair-n
+// try to repair fs by mount/umout, if fail, then try to repair by drop fs log(lost latest updates).
 func (d *cephRBDVolumeDriver) attemptLimitedXFSRepair(fstype, device, mount string) (err error) {
 	log.Printf("WARN: attempting limited XFS repair (mount/unmount) of %s  %s", device, mount)
 
 	// mount
 	err = d.mountDevice(fstype, device, mount)
 	if err != nil {
-		return err
-	}
-
-	// unmount
-	err = d.unmountDevice(device)
-	if err != nil {
-		return err
+		log.Printf("ERROR: repair mount failed %s  %s, force log zeroing", device, mount)
+		return d.xfsRepair(device, true)
+	} else {
+		// unmount
+		err = d.unmountDevice(device)
+		if err != nil {
+			log.Printf("ERROR: repair umount failed %s  %s, force log zeroing", device, mount)
+			return err
+		}
 	}
 
 	// repair fs
-	return d.xfsRepair(device)
+	err = d.xfsRepair(device, false)
+	if err != nil {
+		log.Printf("ERROR: repair failed %s  %s, force log zeroing", device, mount)
+		return d.xfsRepair(device, true)
+	}
+	return err
 }
 
 // mountDevice will call mount on kernel device with a docker volume subdirectory
 func (d *cephRBDVolumeDriver) mountDevice(fstype, device, mountdir string) error {
 	_, err := shWithDefaultTimeout("mount", "-t", fstype, device, mountdir)
+	if err == nil {
+
+		// shutdown xfs when io error encountered
+		//
+		// ref: http://oss.sgi.com/archives/xfs/2016-05/msg00049.html
+		// If we take "retry forever" literally on metadata IO errors, we can
+		// hang at unmount, once it retries those writes forever. This is the
+		// default behavior, unfortunately.
+		//
+		// Currently, there is no way to move the unmount forward, once the mount point
+		// will be already detached, making a call to xfs_io shutdown impossible.
+		//
+		// To fix this, we need to mark the filesystem as being in the process
+		// of unmounting, so that a shutdown can be triggered in case of errors
+		index := string(device[8:])
+		max_retries := "/sys/fs/xfs/nbd" + index + "/error/metadata/EIO/max_retries"
+		err = echo("0", max_retries)
+	}
 	return err
 }
 
@@ -1442,7 +1482,7 @@ func (d *cephRBDVolumeDriver) isMountpoint(path string) (error, bool) {
 
 // umount a path
 func (d *cephRBDVolumeDriver) unmountPath(path string) error {
-	_, err := shWithDefaultTimeout("umount", "-l", path)
+	_, err := shWithDefaultTimeout("umount", path)
 	return err
 }
 

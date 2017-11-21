@@ -29,8 +29,8 @@ var (
 	debugFlag          = flag.Bool("debug", false, "Debug output")
 	pluginName         = flag.String("name", "rbd", "Docker plugin name for use on --volume-driver option")
 	cephUser           = flag.String("user", "admin", "Ceph user")
-	cephConfigFile     = flag.String("config", "/etc/ceph/xtao.conf", "Xtao ceph cluster config") // more likely to have config file pointing to cluster
-	cephCluster        = flag.String("cluster", "xtao", "xtao ceph cluster")                      // less likely to run multiple clusters on same hardware
+	cephConfigFile     = flag.String("config", "/etc/ceph/ceph.conf", "ceph cluster config") // more likely to have config file pointing to cluster
+	cephCluster        = flag.String("cluster", "ceph", "ceph cluster")                      // less likely to run multiple clusters on same hardware
 	defaultCephPool    = flag.String("pool", "rbd", "Default Ceph Pool for RBD operations")
 	pluginDir          = flag.String("plugins", "/run/docker/plugins", "Docker plugin directory for socket")
 	rootMountDir       = flag.String("mount", dkvolume.DefaultDockerRootDirectory, "Mount directory for volumes on host")
@@ -66,7 +66,7 @@ func contains(vals []string, check string) bool {
 	return false
 }
 
-var removeActionFlag removeAction = "ignore"
+var removeActionFlag removeAction = "rename"
 
 func init() {
 	flag.Var(&removeActionFlag, "remove", "Action to take on Remove: ignore, delete or rename")
