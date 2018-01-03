@@ -432,14 +432,24 @@ func (d cephRBDVolumeDriver) Mount(r dkvolume.MountRequest) dkvolume.Response {
 	// clear mount point
 	mount_point := d.mountpoint(pool, name)
 	err, mp := d.isMountpoint(mount_point)
-	if err != nil {
-		log.Printf("WARNING: check mount point failed: %s", err)
-		//return dkvolume.Response{Err: err.Error()}
-	}
-	if mp {
-		emsg := fmt.Sprintf("ERROR: mountpoin(%s) not clean", mount_point)
-		log.Printf(emsg)
-		return dkvolume.Response{Err: emsg}
+	if (err != nil) && !strings.Contains(err.Error(), "input/output error") {
+		log.Printf("ERROR: check mount point failed: %s", err)
+		return dkvolume.Response{Err: err.Error()}
+	} else {
+		// when the dest dir has an IO error, Stat will return "input/output error" and
+		// MkdirAll will return "file exists"
+		if ((err != nil) && strings.Contains(err.Error(), "input/output error")) || ((err == nil) && mp) {
+			emsg := fmt.Sprintf("WARNING: mountpoin(%s) not clean", mount_point)
+			log.Printf(emsg)
+			// umount
+			err = d.unmountPath(mount_point)
+			if err != nil {
+				emsg := fmt.Sprintf("ERROR: Umount path(%s) failed: %s", mount_point, err)
+				log.Printf(emsg)
+				return dkvolume.Response{Err: emsg}
+			}
+
+		}
 	}
 
 	lockers, err := d.sh_getImageLocks(pool, name)
@@ -1462,12 +1472,21 @@ func (d *cephRBDVolumeDriver) unmountDevice(device string) error {
 
 // check if a path is a mountpoint
 func (d *cephRBDVolumeDriver) isMountpoint(path string) (error, bool) {
-
 	// check if dir exist
 	fInfo, e := os.Stat(path)
-	if e != nil || !fInfo.IsDir() {
-		emsg := fmt.Sprintf("path(%s) invalid", path)
-		return errors.New(emsg), false
+	log.Printf("INFO: Stat, %s\n", e)
+	if e != nil {
+		// dir not exist
+		if strings.Contains(e.Error(), "no such file or directory") {
+			return nil, false
+		} else { // when the dest dir has an IO error, Stat will return ""input/output error
+			return e, false
+		}
+	} else {
+		if !fInfo.IsDir() {
+			emsg := fmt.Sprintf("path(%s) invalid", path)
+			return errors.New(emsg), false
+		}
 	}
 
 	out, err := shWithDefaultTimeout("mountpoint", path)
