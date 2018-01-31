@@ -39,7 +39,7 @@ rm -rf vendor
 # set up temporary build gopath, and put our directory there
 mkdir -p ./_build/src/github.com/
 ln -s $(pwd) ./_build/src/github.com/
-export GOPATH=$(pwd)/_build:%{gopath}:$HOME
+export GOPATH=$(pwd)/_build:%{gopath}:$HOME$:$HOME/go:$GOPATH
 go build -o rbd-docker-plugin .
 
 %install
