@@ -29,10 +29,6 @@
 
 * this plugin must run before docker daemon
 
-## user of this plugin must apply patch ceph-patch/rbd-nbd-ceph-10.2.2.patch
-
-we add lock in do\_map function.
-
 ## Generate RPMs
 
 	$ sudo yum install -y rpm-build

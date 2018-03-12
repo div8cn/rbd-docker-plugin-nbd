@@ -976,8 +976,8 @@ func (d *cephRBDVolumeDriver) sh_createRBDImage(pool string, name string, size i
 	//	"--image-features", strconv.Itoa(4),
 	args := append([]string{"--image-format", strconv.Itoa(2), "--size", strconv.Itoa(size), name})
 	if d.useNbd { // disable feature exclusive-lock
-		args = append([]string{"--image-feature", "layering", "--image-feature",
-			"deep-flatten"}, args...)
+		//		args = append([]string{"--image-feature", "layering", "--image-feature",
+		//			"deep-flatten"}, args...)
 	}
 	_, err = d.rbdsh(pool, "create", args...)
 	if err != nil {
@@ -1252,12 +1252,11 @@ func (d *cephRBDVolumeDriver) preemptRBDLock(pool, name string, locker Lock) err
 	var err error
 
 	// we should never preempt locks not added by nbd-map
-	if !strings.Contains(locker.id, "db") || !strings.Contains("db", locker.id) {
-		log.Printf("ERROR: lock id(%s) is not 'db'", locker.id)
-		emsg := fmt.Sprintf("locker id(%s) is not 'db'", locker.id)
-		return errors.New(emsg)
-	}
-
+	//if !strings.Contains(locker.id, "db") || !strings.Contains("db", locker.id) {
+	//	log.Printf("ERROR: lock id(%s) is not 'db'", locker.id)
+	//	emsg := fmt.Sprintf("locker id(%s) is not 'db'", locker.id)
+	//	return errors.New(emsg)
+	//}
 	// kill rbd-nbd daemon with the same pool/name
 	err = d.sh_kill_rbd_nbd(pool, name)
 	if err != nil {
@@ -1269,7 +1268,7 @@ func (d *cephRBDVolumeDriver) preemptRBDLock(pool, name string, locker Lock) err
 	// remove the rbd image lock, lock remove will automatically add the previous lock
 	// client address into the osd blacklist with default expire(1000000000="2049-01-03")
 	_, err = d.rbdsh(pool, "lock", "rm", name, locker.id, locker.locker,
-		"--expire", "1000000000")
+		"--rbd-blacklist-expire-seconds=1000000000")
 	if err != nil {
 		log.Printf("ERROR: lock image(%s) failed: %s", name, err)
 		return err
@@ -1330,7 +1329,7 @@ func (d *cephRBDVolumeDriver) mapImage(pool, imagename string) (string, error) {
 	var err error
 	if d.useNbd {
 		target := fmt.Sprintf("%s/%s", pool, imagename)
-		device, err = d.nbdsh("map", target, "", "--autolock")
+		device, err = d.nbdsh("map", target, "", "--exclusive")
 	} else {
 		device, err = d.rbdsh(pool, "map", imagename)
 	}
@@ -1531,7 +1530,8 @@ func (d *cephRBDVolumeDriver) rbdsh(pool, command string, args ...string) (strin
 
 // nbdsh will call rbd-nbd with the given arguments
 func (d *cephRBDVolumeDriver) nbdsh(command, target, device string, args ...string) (string, error) {
-	args = append([]string{"--conf", d.config, "--id", d.user}, args...)
+	// Uncomment this line to enalbe user to specify cluster name and user id
+	// args = append([]string{"--conf", d.config, "--id", d.user}, args...)
 	if target != "" {
 		args = append([]string{target}, args...)
 	}
@@ -1556,7 +1556,7 @@ func (d *cephRBDVolumeDriver) sh_getImageLocks(pool, imagename string) ([]Lock, 
 		return nil, err
 	}
 
-	lines := regexpLines(out, `^(\S*\.\d+)\s(\S+)\s(\S+\/\d+)$`)
+	lines := regexpLines(out, `^(\S*\.\d+)\s(\S+\s\S+)\s(\S+\/\d+)$`)
 	for _, line := range lines {
 		if isDebugEnabled() {
 			log.Printf("DEBUG: found locker [%s] [%s] [%s]\n", line[1], line[2], line[3])

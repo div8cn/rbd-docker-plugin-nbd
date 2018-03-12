@@ -5,7 +5,7 @@ Wants=docker.service
 Before=docker.service
 
 [Service]
-ExecStart=/usr/bin/rbd-docker-plugin -create -cluster xtao -config /etc/ceph/xtao.conf -use-nbd
+ExecStart=/usr/bin/rbd-docker-plugin -create -cluster ceph -config /etc/ceph/ceph.conf -use-nbd
 Restart=always
 RestartSec=0
 
