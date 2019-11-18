@@ -113,7 +113,11 @@ rpms: version
 	cd ../ && tar -cjf rbd-docker-plugin.tar.bz2 rbd-docker-plugin && cd -
 	rm -rf ./rpmbuild
 	mkdir -p ./rpmbuild
-	mkdir -p ./rpmbuild/{BUILD,RPMS,S{OURCE,PEC,RPM}S}
+	mkdir -p ./rpmbuild/BUILD
+	mkdir -p ./rpmbuild/RPMS
+	mkdir -p ./rpmbuild/SOURCES
+	mkdir -p ./rpmbuild/SPECS
+	mkdir -p ./rpmbuild/SRPMS
 	cp rbd-docker-plugin.spec ./rpmbuild/SPECS
 	mv ../rbd-docker-plugin.tar.bz2 ./rpmbuild/SOURCES/
 	sed -i "s/@VERSION@/${VERSION}/g" ./rpmbuild/SPECS/rbd-docker-plugin.spec

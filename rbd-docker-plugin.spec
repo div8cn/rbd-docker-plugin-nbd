@@ -19,8 +19,8 @@ License:  GPL
 URL:    www.xtao.com        
 Source0: %{name}.tar.bz2      
 
-BuildRequires:  gcc
-BuildRequires:  golang >= 1.7.4
+#BuildRequires:  gcc
+#BuildRequires:  golang >= 1.9.1
 
 Provides:  rados(github.com/ceph/go-ceph/rados)
 Provides:  rbd(github.com/ceph/go-ceph/rbd)
@@ -39,7 +39,7 @@ rm -rf vendor
 # set up temporary build gopath, and put our directory there
 mkdir -p ./_build/src/github.com/
 ln -s $(pwd) ./_build/src/github.com/
-export GOPATH=$(pwd)/_build:%{gopath}:$HOME$:$HOME/go:$GOPATH
+export GOPATH=$(pwd)/_build:$GOPATH #:%{gopath}:$HOME$:$HOME/go:$GOPATH
 go build -o rbd-docker-plugin .
 
 %install
