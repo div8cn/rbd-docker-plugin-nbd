@@ -1463,9 +1463,13 @@ func (d *cephRBDVolumeDriver) mountDevice(fstype, device, mountdir string) error
 		//
 		// To fix this, we need to mark the filesystem as being in the process
 		// of unmounting, so that a shutdown can be triggered in case of errors
-		index := string(device[8:])
-		max_retries := "/sys/fs/xfs/nbd" + index + "/error/metadata/EIO/max_retries"
-		err = echo("0", max_retries)
+		
+		//I did some testing in RHEL 7.5, and found that the default settings of XFS no
+		//longer retry forever, which means that the "error/metadata/ENOSPC" and 
+		//"error/metadata/EIO" settings no longer need to be made on each mount.
+		//index := string(device[8:])
+		//max_retries := "/sys/fs/xfs/nbd" + index + "/error/metadata/EIO/max_retries"
+		//err = echo("0", max_retries)
 	}
 	return err
 }
